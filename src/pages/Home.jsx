@@ -18,7 +18,7 @@ export default function Home({ user }) {
   const [jobId, setJobId] = useState(null)
   const [error, setError] = useState('')
 
-  const handleSubmit = async (url) => {
+  const handleSubmit = async (url, clipCount) => {
     setProcessing(true)
     setStep('downloading')
     setProgress(0)
@@ -43,15 +43,16 @@ export default function Home({ user }) {
       setStep('analyzing')
       setProgress(20)
 
-      const moments = await detectBestMoments(videoInfo.title, videoInfo.durationSeconds)
+      const moments = await detectBestMoments(videoInfo.title, videoInfo.durationSeconds, clipCount)
 
       setProgress(40)
-      const clipsData = await Promise.all(
-        moments.map(async (m) => {
-          const content = await generateCaptionAndHashtags(videoInfo.title, m.reason)
-          return { ...m, ...content }
-        })
-      )
+      const clipsData = []
+      for (let i = 0; i < moments.length; i++) {
+        const m = moments[i]
+        const content = await generateCaptionAndHashtags(videoInfo.title, m.reason)
+        clipsData.push({ ...m, ...content })
+        if (i < moments.length - 1) await new Promise((r) => setTimeout(r, 1500))
+      }
 
       setStep('cutting')
       setProgress(60)

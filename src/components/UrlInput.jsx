@@ -1,19 +1,38 @@
 import { useState } from 'react'
 
+const CLIP_OPTIONS = [1, 2, 3, 4, 5]
+
 export default function UrlInput({ onSubmit, loading }) {
   const [url, setUrl] = useState('')
+  const [clipCount, setClipCount] = useState(4)
 
   const handleSubmit = (e) => {
     e.preventDefault()
     if (!url.trim()) return
-    onSubmit(url.trim())
+    onSubmit(url.trim(), clipCount)
   }
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="max-w-2xl mx-auto px-4 pb-16"
-    >
+    <form onSubmit={handleSubmit} className="max-w-2xl mx-auto px-4 pb-16">
+      <div className="flex items-center justify-center gap-2 mb-4">
+        <span className="text-sm text-gray-400">Clips:</span>
+        {CLIP_OPTIONS.map((n) => (
+          <button
+            key={n}
+            type="button"
+            onClick={() => setClipCount(n)}
+            disabled={loading}
+            className={`w-8 h-8 rounded-lg text-sm font-medium transition-all ${
+              clipCount === n
+                ? 'bg-accent text-white'
+                : 'bg-white/5 text-gray-400 hover:text-white'
+            }`}
+          >
+            {n}
+          </button>
+        ))}
+      </div>
+
       <div className="relative flex items-center">
         <input
           type="url"
