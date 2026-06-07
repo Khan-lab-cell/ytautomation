@@ -1,9 +1,13 @@
 const STEPS = [
-  { key: 'downloading', label: 'Downloading Video' },
+  { key: 'downloading', label: 'Downloading' },
   { key: 'analyzing', label: 'AI Analysis' },
   { key: 'cutting', label: 'Cutting Clips' },
   { key: 'ready', label: 'Ready' },
 ]
+
+const LABEL_MAP = {
+  cutting: 'Downloading & processing video...',
+}
 
 export default function ProcessingStatus({ currentStep, progress }) {
   const stepIndex = STEPS.findIndex((s) => s.key === currentStep)
@@ -52,7 +56,7 @@ export default function ProcessingStatus({ currentStep, progress }) {
         {progress > 0 && (
           <div className="space-y-2">
             <div className="flex justify-between text-sm text-gray-400">
-              <span>Progress</span>
+              <span>{LABEL_MAP[currentStep] || 'Processing'}</span>
               <span>{progress}%</span>
             </div>
             <div className="h-2 rounded-full bg-white/5 overflow-hidden">

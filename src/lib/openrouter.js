@@ -6,19 +6,30 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms))
 }
 
+const TIMEOUT_MS = 60000
+
 async function callOpenRouter(prompt, retry = 0) {
-  const res = await fetch(OPENROUTER_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${import.meta.env.VITE_OPENROUTER_API_KEY}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': window.location.origin,
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      messages: [{ role: 'user', content: prompt }],
-    }),
-  })
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
+
+  let res
+  try {
+    res = await fetch(OPENROUTER_URL, {
+      signal: controller.signal,
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${import.meta.env.VITE_OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': window.location.origin,
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    })
+  } finally {
+    clearTimeout(timer)
+  }
 
   if (res.status === 429 && retry < MAX_RETRIES) {
     const retryAfter = res.headers.get('Retry-After')
@@ -30,7 +41,10 @@ async function callOpenRouter(prompt, retry = 0) {
   }
 
   if (!res.ok) {
-    throw new Error(`OpenRouter error: ${res.status}`)
+    if (res.status === 402) {
+      throw new Error('OpenRouter: Free tier quota exceeded or needs payment. Add credits or use a different key.')
+    }
+    throw new Error(`OpenRouter error: ${res.status} ${res.statusText}`)
   }
 
   const data = await res.json()

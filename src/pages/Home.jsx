@@ -47,15 +47,15 @@ export default function Home({ user }) {
 
       setProgress(40)
 
-      setStep('cutting')
-      setProgress(60)
-
       if (!videoInfo.downloadUrl) {
         throw new Error('No downloadable video URL found')
       }
 
+      setStep('cutting')
+      setProgress(45)
+
       const cutClips = await cutVideoIntoClips(videoInfo.downloadUrl, clipsData, (p) => {
-        setProgress(60 + Math.round((p * 30) / 100))
+        setProgress(45 + Math.round((p * 50) / 100))
       })
 
       const finalClips = cutClips.map((clip, i) => ({
@@ -75,7 +75,10 @@ export default function Home({ user }) {
           .eq('id', job.id)
       }
     } catch (err) {
-      setError(err.message)
+      const msg = err.name === 'AbortError'
+        ? 'AI analysis timed out (60s). OpenRouter free tier may be overloaded. Try again later.'
+        : err.message
+      setError(msg)
       if (jobId && user) {
         await supabase
           .from('jobs')
