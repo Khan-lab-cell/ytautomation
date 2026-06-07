@@ -243,6 +243,7 @@ export default async function handler(req, res) {
   try {
     const streamingUrl = await extractStreamingUrl(vid, quality)
     if (streamingUrl) {
+      console.log('[proxy-video] Vercel extraction OK, streaming from Vercel')
       const ok = await streamFromVercel(streamingUrl, quality, req, res)
       if (ok) return
     }
@@ -250,5 +251,6 @@ export default async function handler(req, res) {
     console.warn('[proxy-video] Vercel extraction failed:', err.message)
   }
 
+  console.log('[proxy-video] Falling back to Railway worker')
   await proxyViaWorker(decodedUrl, quality, req, res)
 }
