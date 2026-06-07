@@ -1,5 +1,5 @@
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
-const MODEL = 'meta-llama/llama-3.3-70b-instruct:free'
+const MODEL = 'openrouter/free'
 const MAX_RETRIES = 3
 
 function sleep(ms) {
@@ -21,7 +21,10 @@ async function callOpenRouter(prompt, retry = 0) {
   })
 
   if (res.status === 429 && retry < MAX_RETRIES) {
-    const wait = (2 ** (retry + 2) + Math.random()) * 1000
+    const retryAfter = res.headers.get('Retry-After')
+    const wait = retryAfter
+      ? parseInt(retryAfter) * 1000 + Math.random() * 500
+      : (2 ** (retry + 3) + Math.random()) * 1000
     await sleep(wait)
     return callOpenRouter(prompt, retry + 1)
   }
