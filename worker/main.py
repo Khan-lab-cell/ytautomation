@@ -29,6 +29,11 @@ API_KEY = os.environ.get("WORKER_API_KEY", "")
 MAX_FILE_MB = int(os.environ.get("MAX_FILE_MB", "50"))
 DOWNLOAD_TIMEOUT = int(os.environ.get("DOWNLOAD_TIMEOUT", "120"))
 RATE_LIMIT_PER_MIN = int(os.environ.get("RATE_LIMIT_PER_MIN", "10"))
+COOKIES_PATH = "/tmp/youtube_cookies.txt"
+
+
+def _cookies_args() -> list[str]:
+    return ["--cookies", COOKIES_PATH] if os.path.isfile(COOKIES_PATH) else []
 
 YOUTUBE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{11}$")
 _rate: dict[str, list[float]] = defaultdict(list)
@@ -84,6 +89,16 @@ async def startup():
     if os.path.isdir(deno_path) and deno_path not in os.environ.get("PATH", ""):
         os.environ["PATH"] = f"{deno_path}:{os.environ['PATH']}"
         log.info("deno found at %s", deno_path)
+
+    cookies_raw = os.environ.get("YOUTUBE_COOKIES", "").strip()
+    if cookies_raw:
+        try:
+            with open(COOKIES_PATH, "w") as f:
+                f.write(cookies_raw)
+            os.chmod(COOKIES_PATH, 0o600)
+            log.info("cookies written to %s (%d bytes)", COOKIES_PATH, len(cookies_raw))
+        except Exception as e:
+            log.error("failed to write cookies: %s", e)
 
 
 @app.get("/")
@@ -160,16 +175,17 @@ async def video_info(request: Request):
     except Exception as e:
         log.warning("lightweight info failed id=%s: %s", vid, e)
 
-    if not success:
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "yt-dlp",
-                "--no-playlist",
-                "--no-warnings",
-                "--remote-components", "ejs:github",
-                "--extractor-args", "youtube:player_client=ios,tv,web;player_skip=webpage",
-                "--dump-json",
-                f"https://www.youtube.com/watch?v={vid}",
+        if not success:
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "yt-dlp",
+                    "--no-playlist",
+                    "--no-warnings",
+                    "--remote-components", "ejs:github",
+                    "--extractor-args", "youtube:player_client=ios,tv,web;player_skip=webpage",
+                    *_cookies_args(),
+                    "--dump-json",
+                    f"https://www.youtube.com/watch?v={vid}",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -243,6 +259,7 @@ async def download(request: Request):
                 "--no-progress",
                 "--remote-components", "ejs:github",
                 "--extractor-args", "youtube:player_client=ios,tv,web;player_skip=webpage",
+                *_cookies_args(),
                 "-o", "-",
                 f"https://www.youtube.com/watch?v={vid}",
                 stdout=asyncio.subprocess.PIPE,
