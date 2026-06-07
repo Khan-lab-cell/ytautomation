@@ -10,7 +10,7 @@ function getSupportedMimeType() {
 }
 
 export async function cutVideoIntoClips(videoUrl, clipPoints, onProgress) {
-  const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(videoUrl)}`
+  const proxyUrl = `/api/proxy-video?url=${encodeURIComponent(videoUrl)}`
 
   console.log('[Clipper] Downloading video...')
   const resp = await fetch(proxyUrl)
