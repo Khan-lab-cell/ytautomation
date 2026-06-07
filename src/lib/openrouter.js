@@ -1,5 +1,5 @@
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
-const MODEL = 'mistralai/mistral-7b-instruct:free'
+const MODEL = 'meta-llama/llama-3.3-70b-instruct:free'
 
 async function callOpenRouter(prompt) {
   const res = await fetch(OPENROUTER_URL, {
