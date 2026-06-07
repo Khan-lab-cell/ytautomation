@@ -9,10 +9,22 @@ function getSupportedMimeType() {
   return types.find((t) => MediaRecorder.isTypeSupported(t)) || ''
 }
 
-export async function cutVideoIntoClips(videoUrl, clipPoints, onProgress) {
-  const proxyUrl = `/api/proxy-video?url=${encodeURIComponent(videoUrl)}`
+async function getProxyUrl(videoUrl) {
+  const encoded = encodeURIComponent(videoUrl)
+  if ('serviceWorker' in navigator) {
+    const reg = await navigator.serviceWorker.ready
+    if (reg.active && !navigator.serviceWorker.controller) {
+      await new Promise((r) => navigator.serviceWorker.addEventListener('controllerchange', r, { once: true }))
+    }
+    if (navigator.serviceWorker.controller) return `/api/sw-proxy?url=${encoded}`
+  }
+  return `/api/proxy-video?url=${encoded}`
+}
 
-  console.log('[Clipper] Downloading video...')
+export async function cutVideoIntoClips(videoUrl, clipPoints, onProgress) {
+  const proxyUrl = await getProxyUrl(videoUrl)
+
+  console.log('[Clipper] Downloading video via', proxyUrl.includes('sw-proxy') ? 'ServiceWorker' : 'Server')
   const resp = await fetch(proxyUrl)
   if (!resp.ok) throw new Error(`Video download failed (${resp.status})`)
 
