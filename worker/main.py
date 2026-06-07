@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import time
 import asyncio
 import secrets
@@ -108,6 +109,64 @@ async def health():
     return {"ok": True, "ytDlpVersion": ytdlp_ver, "ffmpegVersion": ffmpeg_ver}
 
 
+@app.post("/info")
+async def video_info(request: Request):
+    check_api_key(request)
+    check_rate_limit(request)
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    url = body.get("url") if isinstance(body, dict) else None
+
+    if not url:
+        raise HTTPException(status_code=400, detail="Missing 'url' field")
+
+    vid = extract_video_id(url)
+    if not vid:
+        raise HTTPException(status_code=400, detail="Not a valid YouTube URL")
+
+    log.info("info request id=%s", vid)
+
+    proc = await asyncio.create_subprocess_exec(
+        "yt-dlp",
+        "--no-playlist",
+        "--no-warnings",
+        "--remote-components", "ejs:github",
+        "--dump-json",
+        f"https://www.youtube.com/watch?v={vid}",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+
+    if proc.returncode != 0:
+        err_text = stderr.decode(errors="replace")[:500]
+        log.warning("yt-dlp info failed id=%s exit=%d: %s", vid, proc.returncode, err_text)
+        raise HTTPException(status_code=502, detail=f"Failed to get video info ({proc.returncode})")
+
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=502, detail="Invalid response from yt-dlp")
+
+    title = data.get("title", "Untitled")
+    duration = int(data.get("duration", 600))
+    thumbnail = data.get("thumbnail")
+
+    log.info("info success id=%s title=%s", vid, title[:50])
+
+    return {
+        "title": title,
+        "durationSeconds": duration,
+        "thumbnail": thumbnail,
+        "videoId": vid,
+    }
+
+
 @app.post("/download")
 async def download(request: Request):
     check_api_key(request)
@@ -188,10 +247,6 @@ async def download(request: Request):
             log.exception("stream error id=%s", vid)
             if proc:
                 proc.kill()
-        finally:
-            if proc and proc.returncode is None:
-                proc.kill()
-                await proc.wait()
 
     return StreamingResponse(
         stream(),

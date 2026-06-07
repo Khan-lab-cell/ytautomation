@@ -5,7 +5,7 @@ import ProcessingStatus from '../components/ProcessingStatus'
 import ClipGrid from '../components/ClipGrid'
 import Dashboard from '../components/Dashboard'
 import { supabase } from '../lib/supabase'
-import { getVideoInfo } from '../lib/rapidapi'
+import { getVideoInfo } from '../lib/videoInfo'
 import { detectAndCaptionClips } from '../lib/openrouter'
 import { cutVideoIntoClips } from '../lib/ffmpeg'
 import { postClipToSocial } from '../lib/zernio'
@@ -54,14 +54,10 @@ export default function Home({ user }) {
 
       setProgress(40)
 
-      if (!videoInfo.downloadUrl) {
-        throw new Error('No downloadable video URL found')
-      }
-
       setStep('cutting')
       setProgress(45)
 
-      const cutClips = await cutVideoIntoClips(videoInfo.downloadUrl, clipsData, (p) => {
+      const cutClips = await cutVideoIntoClips(url, clipsData, (p) => {
         setProgress(45 + Math.round((p * 50) / 100))
       })
 
