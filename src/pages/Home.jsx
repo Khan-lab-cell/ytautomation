@@ -6,7 +6,7 @@ import ClipGrid from '../components/ClipGrid'
 import Dashboard from '../components/Dashboard'
 import { supabase } from '../lib/supabase'
 import { getVideoInfo } from '../lib/rapidapi'
-import { detectBestMoments, generateCaptionAndHashtags } from '../lib/openrouter'
+import { detectAndCaptionClips } from '../lib/openrouter'
 import { cutVideoIntoClips } from '../lib/ffmpeg'
 import { postClipToSocial } from '../lib/zernio'
 
@@ -43,16 +43,9 @@ export default function Home({ user }) {
       setStep('analyzing')
       setProgress(20)
 
-      const moments = await detectBestMoments(videoInfo.title, videoInfo.durationSeconds, clipCount)
+      const clipsData = await detectAndCaptionClips(videoInfo.title, videoInfo.durationSeconds, clipCount)
 
       setProgress(40)
-      const clipsData = []
-      for (let i = 0; i < moments.length; i++) {
-        const m = moments[i]
-        const content = await generateCaptionAndHashtags(videoInfo.title, m.reason)
-        clipsData.push({ ...m, ...content })
-        if (i < moments.length - 1) await new Promise((r) => setTimeout(r, 1500))
-      }
 
       setStep('cutting')
       setProgress(60)
@@ -61,7 +54,7 @@ export default function Home({ user }) {
         throw new Error('No downloadable video URL found')
       }
 
-      const cutClips = await cutVideoIntoClips(videoInfo.downloadUrl, moments, (p) => {
+      const cutClips = await cutVideoIntoClips(videoInfo.downloadUrl, clipsData, (p) => {
         setProgress(60 + Math.round((p * 30) / 100))
       })
 
