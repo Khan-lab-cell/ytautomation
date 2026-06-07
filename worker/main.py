@@ -130,32 +130,64 @@ async def video_info(request: Request):
 
     log.info("info request id=%s", vid)
 
-    proc = await asyncio.create_subprocess_exec(
-        "yt-dlp",
-        "--no-playlist",
-        "--no-warnings",
-        "--remote-components", "ejs:github",
-        "--dump-json",
-        f"https://www.youtube.com/watch?v={vid}",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-
-    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
-
-    if proc.returncode != 0:
-        err_text = stderr.decode(errors="replace")[:500]
-        log.warning("yt-dlp info failed id=%s exit=%d: %s", vid, proc.returncode, err_text)
-        raise HTTPException(status_code=502, detail=f"Failed to get video info ({proc.returncode})")
+    title = "Untitled"
+    duration = 600
+    thumbnail = None
+    success = False
 
     try:
-        data = json.loads(stdout)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=502, detail="Invalid response from yt-dlp")
+        import httpx
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            oembed = await client.get(
+                f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={vid}&format=json"
+            )
+            if oembed.status_code == 200:
+                odata = oembed.json()
+                title = odata.get("title", title)
+                thumbnail = odata.get("thumbnail_url", thumbnail)
 
-    title = data.get("title", "Untitled")
-    duration = int(data.get("duration", 600))
-    thumbnail = data.get("thumbnail")
+            page = await client.get(f"https://www.youtube.com/watch?v={vid}")
+            if page.status_code == 200:
+                html = page.text
+                m = re.search(r'"lengthSeconds"\s*:\s*"(\d+)"', html)
+                if m:
+                    duration = int(m.group(1))
+                else:
+                    m = re.search(r'"lengthSeconds"\s*:\s*(\d+)', html)
+                    if m:
+                        duration = int(m.group(1))
+            success = True
+    except Exception as e:
+        log.warning("lightweight info failed id=%s: %s", vid, e)
+
+    if not success:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "yt-dlp",
+                "--no-playlist",
+                "--no-warnings",
+                "--remote-components", "ejs:github",
+                "--extractor-args", "youtube:player_client=ios,tv,web;player_skip=webpage",
+                "--dump-json",
+                f"https://www.youtube.com/watch?v={vid}",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+            if proc.returncode == 0:
+                data = json.loads(stdout)
+                title = data.get("title", title)
+                duration = int(data.get("duration", duration))
+                thumbnail = data.get("thumbnail", thumbnail)
+                success = True
+            else:
+                err_text = stderr.decode(errors="replace")[:300]
+                log.warning("yt-dlp info fallback failed id=%s: %s", vid, err_text)
+        except Exception as e:
+            log.warning("yt-dlp info fallback crashed id=%s: %s", vid, e)
+
+    if not success:
+        raise HTTPException(status_code=502, detail="Failed to get video info from any source")
 
     log.info("info success id=%s title=%s", vid, title[:50])
 
@@ -210,6 +242,7 @@ async def download(request: Request):
                 "--no-warnings",
                 "--no-progress",
                 "--remote-components", "ejs:github",
+                "--extractor-args", "youtube:player_client=ios,tv,web;player_skip=webpage",
                 "-o", "-",
                 f"https://www.youtube.com/watch?v={vid}",
                 stdout=asyncio.subprocess.PIPE,
