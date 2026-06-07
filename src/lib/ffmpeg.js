@@ -1,79 +1,122 @@
-import { FFmpeg } from '@ffmpeg/ffmpeg'
-import { fetchFile, toBlobURL } from '@ffmpeg/util'
-
-let ffmpeg = null
-
-export async function loadFFmpeg(onLog) {
-  if (ffmpeg) return ffmpeg
-  ffmpeg = new FFmpeg()
-  if (onLog) ffmpeg.on('log', onLog)
-  const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd'
-  await ffmpeg.load({
-    coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-    wasmURL: await toBlobURL(
-      `${baseURL}/ffmpeg-core.wasm`,
-      'application/wasm'
-    ),
-  })
-  return ffmpeg
+function getSupportedMimeType() {
+  const types = [
+    'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp8,opus',
+    'video/webm;codecs=h264,opus',
+    'video/webm',
+    'video/mp4',
+  ]
+  return types.find((t) => MediaRecorder.isTypeSupported(t)) || ''
 }
 
 export async function cutVideoIntoClips(videoUrl, clipPoints, onProgress) {
-  const ff = await loadFFmpeg((msg) => console.log('[FFmpeg]', msg))
-
   const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(videoUrl)}`
+  const mimeType = getSupportedMimeType()
 
-  console.log('[FFmpeg] Downloading video...')
-  const resp = await fetch(proxyUrl)
-  if (!resp.ok) throw new Error(`Video download failed: ${resp.status}`)
+  console.log('[Clipper] Using MIME type:', mimeType)
+  console.log('[Clipper] Loading video via proxy...')
 
-  const contentLen = resp.headers.get('content-length')
-  const total = contentLen ? parseInt(contentLen) : 0
-  const reader = resp.body.getReader()
-  const chunks = []
+  const video = document.createElement('video')
+  video.crossOrigin = 'anonymous'
+  video.muted = true
+  video.playsInline = true
+  video.preload = 'auto'
+  video.src = proxyUrl
+  document.body.appendChild(video)
 
-  let downloaded = 0
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    chunks.push(value)
-    downloaded += value.length
-    if (total && onProgress) {
-      onProgress(Math.round((downloaded / total) * 60))
+  let timeout = setTimeout(() => {
+    throw new Error('Video loading timed out (60s)')
+  }, 60000)
+
+  await new Promise((resolve, reject) => {
+    video.onloadedmetadata = () => {
+      console.log('[Clipper] Video loaded, duration:', video.duration)
+      clearTimeout(timeout)
+      resolve()
     }
-  }
+    video.onerror = () => {
+      clearTimeout(timeout)
+      reject(new Error(`Video load error: ${video.error?.message || 'unknown'}`))
+    }
+  })
 
-  onProgress(60)
+  timeout = setTimeout(() => {
+    throw new Error('First frame timed out')
+  }, 30000)
 
-  const videoBlob = new Blob(chunks, { type: 'video/mp4' })
-  await ff.writeFile('input.mp4', await fetchFile(videoBlob))
-
-  onProgress(65)
+  await new Promise((resolve, reject) => {
+    video.onloadeddata = () => {
+      clearTimeout(timeout)
+      resolve()
+    }
+    video.onerror = () => {
+      clearTimeout(timeout)
+      reject(new Error(`First frame error: ${video.error?.message || 'unknown'}`))
+    }
+    video.load()
+  })
 
   const clips = []
 
   for (let i = 0; i < clipPoints.length; i++) {
     const { start, end } = clipPoints[i]
-    const outputName = `clip_${i}.mp4`
+    const duration = end - start
 
-    await ff.exec([
-      '-i',
-      'input.mp4',
-      '-ss',
-      String(start),
-      '-to',
-      String(end),
-      '-c',
-      'copy',
-      outputName,
-    ])
+    console.log(`[Clipper] Clip ${i + 1}: seeking to ${start}s (current: ${video.currentTime})`)
 
-    const data = await ff.readFile(outputName)
-    const blob = new Blob([data.buffer], { type: 'video/mp4' })
+    if (Math.abs(video.currentTime - start) > 0.5) {
+      video.currentTime = start
+      await new Promise((resolve) => {
+        video.onseeked = resolve
+      })
+    }
+
+    console.log(`[Clipper] Clip ${i + 1}: starting recording (${duration}s)`)
+
+    const stream = video.captureStream()
+    const recorder = new MediaRecorder(stream, { mimeType })
+    const chunks = []
+
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) chunks.push(e.data)
+    }
+
+    const recorded = await new Promise((resolve) => {
+      recorder.onstop = () => {
+        clearInterval(checkInterval)
+        clearTimeout(safetyTimer)
+        resolve(chunks)
+      }
+      recorder.start()
+
+      video.play()
+
+      const clipStartTime = video.currentTime
+      const checkInterval = setInterval(() => {
+        if (video.currentTime >= clipStartTime + duration) {
+          recorder.stop()
+          video.pause()
+        }
+      }, 200)
+
+      const safetyTimer = setTimeout(() => {
+        recorder.stop()
+        video.pause()
+      }, (duration + 30) * 1000)
+    })
+
+    const blob = new Blob(recorded, { type: mimeType })
     const url = URL.createObjectURL(blob)
     clips.push({ blob, url, start, end })
+    console.log(`[Clipper] Clip ${i + 1} done: ${(blob.size / 1024 / 1024).toFixed(1)}MB`)
 
-    if (onProgress) onProgress(65 + Math.round(((i + 1) / clipPoints.length) * 35))
+    if (onProgress) onProgress(Math.round(((i + 1) / clipPoints.length) * 100))
+  }
+
+  video.remove()
+
+  if (clips.length === 0) {
+    throw new Error('No clips were created')
   }
 
   return clips
