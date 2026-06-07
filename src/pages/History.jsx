@@ -7,39 +7,52 @@ export default function History({ user }) {
 
   useEffect(() => {
     if (!user) return
-    loadJobs()
+    let cancelled = false
+
+    const load = async () => {
+      const { data } = await supabase
+        .from('jobs')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+      if (cancelled) return
+
+      const jobsWithCounts = await Promise.all(
+        (data || []).map(async (job) => {
+          const { count } = await supabase
+            .from('clips')
+            .select('*', { count: 'exact', head: true })
+            .eq('job_id', job.id)
+
+          const { data: clipData } = await supabase
+            .from('clips')
+            .select('platforms')
+            .eq('job_id', job.id)
+
+          const allPlatforms = [
+            ...new Set((clipData || []).flatMap((c) => c.platforms || [])),
+          ]
+
+          return { ...job, clipCount: count || 0, platforms: allPlatforms }
+        })
+      )
+      if (cancelled) return
+
+      setJobs(jobsWithCounts)
+      setLoading(false)
+    }
+
+    load().catch((err) => {
+      if (!cancelled) {
+        console.error('[History] loadJobs failed:', err)
+        setLoading(false)
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
   }, [user])
-
-  const loadJobs = async () => {
-    const { data } = await supabase
-      .from('jobs')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-
-    const jobsWithCounts = await Promise.all(
-      (data || []).map(async (job) => {
-        const { count } = await supabase
-          .from('clips')
-          .select('*', { count: 'exact', head: true })
-          .eq('job_id', job.id)
-
-        const { data: clipData } = await supabase
-          .from('clips')
-          .select('platforms')
-          .eq('job_id', job.id)
-
-        const allPlatforms = [
-          ...new Set((clipData || []).flatMap((c) => c.platforms || [])),
-        ]
-
-        return { ...job, clipCount: count || 0, platforms: allPlatforms }
-      })
-    )
-
-    setJobs(jobsWithCounts)
-    setLoading(false)
-  }
 
   if (!user) {
     return (

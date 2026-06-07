@@ -24,17 +24,20 @@ export default function Home({ user }) {
     setProgress(0)
     setClips([])
     setError('')
+    setJobId(null)
+
+    let currentJobId = null
 
     try {
-      let job = null
       if (user) {
-        const { data } = await supabase
+        const { data, error: insertErr } = await supabase
           .from('jobs')
           .insert({ user_id: user.id, youtube_url: url, status: 'processing' })
           .select()
           .single()
-        job = data
-        setJobId(job?.id)
+        if (insertErr) console.warn('Job insert failed:', insertErr.message)
+        currentJobId = data?.id ?? null
+        setJobId(currentJobId)
       }
 
       setProgress(10)
@@ -43,7 +46,11 @@ export default function Home({ user }) {
       setStep('analyzing')
       setProgress(20)
 
-      const clipsData = await detectAndCaptionClips(videoInfo.title, videoInfo.durationSeconds, clipCount)
+      const clipsData = await detectAndCaptionClips(
+        videoInfo.title,
+        videoInfo.durationSeconds,
+        clipCount
+      )
 
       setProgress(40)
 
@@ -68,22 +75,22 @@ export default function Home({ user }) {
       setProgress(100)
       setStep('ready')
 
-      if (job?.id && user) {
+      if (currentJobId && user) {
         await supabase
           .from('jobs')
           .update({ status: 'done', video_title: videoInfo.title })
-          .eq('id', job.id)
+          .eq('id', currentJobId)
       }
     } catch (err) {
-      const msg = err.name === 'AbortError'
-        ? 'AI analysis timed out (60s). OpenRouter free tier may be overloaded. Try again later.'
-        : err.message
+      console.error('[Home] Processing failed:', err)
+      const msg =
+        err.name === 'AbortError'
+          ? 'AI analysis timed out (60s). OpenRouter free tier may be overloaded. Try again later.'
+          : err.message || 'Unknown error'
       setError(msg)
-      if (jobId && user) {
-        await supabase
-          .from('jobs')
-          .update({ status: 'failed' })
-          .eq('id', jobId)
+      setStep(null)
+      if (currentJobId && user) {
+        await supabase.from('jobs').update({ status: 'failed' }).eq('id', currentJobId)
       }
     } finally {
       setProcessing(false)
@@ -91,15 +98,15 @@ export default function Home({ user }) {
   }
 
   const handlePostClip = async (clip, platforms) => {
-    if (!clip.blob) return
+    if (!clip.blob) throw new Error('Clip has no video data to post.')
     const result = await postClipToSocial(clip.blob, clip.caption, clip.hashtags, platforms)
 
     if (jobId && user) {
       await supabase.from('clips').insert({
         job_id: jobId,
         clip_number: clips.indexOf(clip) + 1,
-        start_time: clip.start,
-        end_time: clip.end,
+        start_time: Math.round(clip.start),
+        end_time: Math.round(clip.end),
         caption: clip.caption,
         hashtags: clip.hashtags,
         platforms,
@@ -107,12 +114,22 @@ export default function Home({ user }) {
         zernio_post_id: result?.id || null,
       })
     }
+    return result
   }
 
   const handlePostAll = async (platforms) => {
+    const errors = []
     for (const clip of clips) {
       if (!clip.blob) continue
-      await handlePostClip(clip, platforms)
+      try {
+        await handlePostClip(clip, platforms)
+      } catch (err) {
+        console.error('[Home] Post failed for clip', clip.start, err)
+        errors.push(err.message)
+      }
+    }
+    if (errors.length > 0) {
+      setError(`Posted with ${errors.length} failure(s): ${errors.slice(0, 2).join(' | ')}`)
     }
   }
 

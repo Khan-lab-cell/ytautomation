@@ -6,38 +6,51 @@ export default function Dashboard({ user }) {
 
   useEffect(() => {
     if (!user) return
-    loadStats()
-  }, [user])
+    let cancelled = false
 
-  const loadStats = async () => {
-    const { data: jobs } = await supabase
-      .from('jobs')
-      .select('id')
-      .eq('user_id', user.id)
+    const load = async () => {
+      const { data: jobs } = await supabase
+        .from('jobs')
+        .select('id')
+        .eq('user_id', user.id)
+      if (cancelled) return
 
-    const { count: clipsCount } = await supabase
-      .from('clips')
-      .select('*', { count: 'exact', head: true })
-      .in(
-        'job_id',
-        (jobs || []).map((j) => j.id)
-      )
+      const jobIds = (jobs || []).map((j) => j.id)
+      let clipsCount = 0
+      let postedCount = 0
 
-    const { count: postedCount } = await supabase
-      .from('clips')
-      .select('*', { count: 'exact', head: true })
-      .in(
-        'job_id',
-        (jobs || []).map((j) => j.id)
-      )
-      .eq('post_status', 'posted')
+      if (jobIds.length > 0) {
+        const { count: cc } = await supabase
+          .from('clips')
+          .select('*', { count: 'exact', head: true })
+          .in('job_id', jobIds)
+        if (cancelled) return
+        clipsCount = cc || 0
 
-    setStats({
-      totalJobs: jobs?.length || 0,
-      totalClips: clipsCount || 0,
-      postedClips: postedCount || 0,
+        const { count: pc } = await supabase
+          .from('clips')
+          .select('*', { count: 'exact', head: true })
+          .in('job_id', jobIds)
+          .eq('post_status', 'posted')
+        if (cancelled) return
+        postedCount = pc || 0
+      }
+
+      setStats({
+        totalJobs: jobs?.length || 0,
+        totalClips: clipsCount,
+        postedClips: postedCount,
+      })
+    }
+
+    load().catch((err) => {
+      if (!cancelled) console.error('[Dashboard] loadStats failed:', err)
     })
-  }
+
+    return () => {
+      cancelled = true
+    }
+  }, [user])
 
   if (!user) return null
 
