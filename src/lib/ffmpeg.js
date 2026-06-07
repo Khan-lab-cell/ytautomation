@@ -19,7 +19,9 @@ export async function loadFFmpeg() {
 
 export async function cutVideoIntoClips(videoUrl, clipPoints, onProgress) {
   const ff = await loadFFmpeg()
-  const videoData = await fetchFile(videoUrl)
+
+  const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(videoUrl)}`
+  const videoData = await fetchFile(proxyUrl)
   await ff.writeFile('input.mp4', videoData)
 
   const clips = []
